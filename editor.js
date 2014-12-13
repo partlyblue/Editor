@@ -1,6 +1,20 @@
 //		USEFUL PROTOTYPES & FUNCTIONS
 String.prototype.replaceAll = function(rep,str){
 	var nStr = "";
+	if (typeof(rep) == "object"){
+		for (var i=0;i<this.length;i++){
+			var found = false;
+			for (var rI=0;rI<rep.length;rI++){
+				if (this.substr(i,rep[rI].length) == rep[rI]){
+					nStr += ((typeof(str)!="object")? str: str[rI]);
+					found = true;
+					break;
+				}
+			}
+			if (!found)nStr += this.substr(i,1);
+		}
+		return nStr;
+	}
 	for (var i=0;i<this.length;i++){
 		if (this.substr(i,rep.length) == rep){
 			nStr += str;
@@ -19,20 +33,10 @@ function getByClass(elem,cName){
 function getById(id){
 	return document.getElementById(id);
 }
-function ifValEqual(value,isArray,equalArray,ifNot){
-	if (isArray.length!=equalArray.length) throw new Error("Arrays not equal!");
-	ifNot = (ifNot!=null)? ifNot: value;
-	for (var i=0;i<isArray.length;i++){
-		endValue = ifNot;
-		if (value == isArray[i])return equalArray[i];
-	}
-	return ifNot;
-}
-
 
 //		Class Objects
 function Cursor(){
-	this.x = 0; this.y = 0;
+	this.x = 1; this.y = 1;
 	this.holder = getById("cursor");
 	this.set = function(){
 		var arg1 = arguments[0];
@@ -69,35 +73,94 @@ function Cursor(){
 				nodes = getByClass(this.holder,"text")[0].childNodes;
 			for (var i=0;i<nodes.length;i++){
 				text += (nodes[i].toString().indexOf("[object HTML") == -1)? nodes[i].textContent: (
-					(nodes[i].getAttribute("hide")!=null)? nodes[i].getAttribute("hide"):nodes[i].innerText
+					(nodes[i].getAttribute("whitespace")!=null)? nodes[i].getAttribute("whitespace"):nodes[i].innerText
 				);
 			}
 			return text;
 		}
 		this.setText = function(text){
 			var value = "";
-			for (var i=0;i<text.length;i++){
-				var char = text.charAt(i);
-				value += ifValEqual(char,["\t"," ","<",">"],["<span class='char' hide='\t'>TTTT</span>","<span class='char' hide=' '>_</span>","<span class='char'><</span>","<span class='char'>></span>"]);
-			}
-			getByClass(this.holder,"text")[0].innerHTML = value;
+			text = text.replaceAll(["\t","\n"," ","&","<",">"],["<span class='char' whitespace='\t'>TTTT</span>","","<span class='char' whitespace=' '>_</span>","<span class='char'>&</span>","<span class='char'><</span>","<span class='char'>></span>"]);
+			getByClass(this.holder,"text")[0].innerHTML = text;
 		}
+
+		this.focus = function(scroll){
+			lines = getByClass(document,"line");
+			for (var i=0; i<lines.length; i++){
+				if (lines[i]!=this.holder)lines[i].removeAttribute("focused");
+				else {
+					this.holder.setAttribute("focused","");
+					cursor.set(cursor.x,i+1);
+					currentLine = lines[i];
+					if(scroll==true && i > 11)lines[i-12].scrollIntoView();
+				}
+			}
+		}
+
+		this.remove = function(){
+			if (lines.length > 1){
+				_lines.removeChild(this.holder);
+				Line.focusLine(cursor.y-1);
+				drawGutter();
+			}
+		}
+
 	}
 	Line.getLine = function(lineNum){
-		lineNum = (lineNum!=null)? lineNum: cursor.y+1;
+		lineNum = (lineNum!=null)? lineNum: cursor.y;
 		if (lineNum < 1 | lineNum > lines.length) throw new Error("Line number out of range!");
 		var line = new Line();
 		line.holder = lines[lineNum-1];
 		return line;
 	}
+	Line.focusLine = function(lineNum,scroll){
+		lineNum = (lineNum > 0)? ((lineNum <= lines.length)? lineNum: lines.length): 1;
+		Line.getLine(lineNum).focus(scroll);
+	}
+
+	//	Set the entire document's text
+	Line.setText = function(text){
+		var lines = text.split("\n");
+		_lines.innerHTML = "<div id='cursor'></div>\n<div id='gutter-filler'></div>\n";
+		for (var i=0;i<lines.length;i++){
+			Line.insertNew(null,Line.formatChars(lines[i])+"</span></div>\n");
+		}
+		Line.focusLine(1);
+	}
+	Line.insertNew = function(index,content){
+		index = (index!=null)? index: cursor.y;
+		content = (content!=null)? content.replaceAll("\n",""): "";
+		var before = lines[index];
+
+		var line = document.createElement("div");
+		line.setAttribute("class","line");
+
+		var lineNum = document.createElement("div");
+		lineNum.setAttribute("class","lineNum");
+		lineNum.innerText = lines.length+1;
+		line.appendChild(lineNum);
+
+		var text = document.createElement("span");
+		text.setAttribute("class","text");
+		text.innerHTML = content;
+		line.appendChild(text);
+
+		if (before)_lines.insertBefore(line,before)
+		else _lines.appendChild(line);
+		Line.focusLine(index+1);
+		drawGutter();
+	}
+	Line.removeLine = function(lineNum){
+		Line.getLine(lineNum).remove();
+	}
+
+	Line.formatChars = function(text,reverse){
+		var normalized = ["\t"," ","&","<",">"],
+			formated = ["<span class='char' whitespace='\t'>TTTT</span>","<span class='char' whitespace=' '>_</span>","<span class='char'>&</span>","<span class='char'><</span>","<span class='char'>></span>"];
+		return (!reverse)? text.replaceAll(normalized,formated): text.replaceAll(formated,normalized);
+	}
 
 }
-
-
-
-
-
-
 
 
 //		VARS
@@ -106,14 +169,21 @@ var t=getById("t"),
 	lines=getByClass(document,"line"),
 	cursor;
 
-
+getById("upload").onchange = function(e){
+	var r = new FileReader();
+	r.readAsText(e.target.files[0]);
+	r.onload = function(){
+		Line.setText(r.result);
+	}
+	e.target.value = "";
+}
 
 //		EVENT LISTENERS
 
 window.onload = function(){
 	t.focus();
 	cursor = new Cursor();
-	addLine();
+	Line.insertNew();
 };
 document.body.onclick = function(){
 	t.focus();
@@ -132,55 +202,51 @@ key = function(e){
 		e.preventDefault();
 		if (Line.getLine().getText()!=""){
 			t.value = "\b";
-			setTimeout(write,10);
+			write();
 		} else {
-			removeLine();
+			Line.removeLine();
 		}
 	} else if (k == 9){
 		//		TAB
 		e.preventDefault();
-		t.value = "<span class='char' hide='\t'>TTTT</span>";
-		setTimeout(write,10);
+		t.value = "<span class='char' whitespace='\t'>TTTT</span>";
 	} else if (k == 13){
 		//		ADD NEW LINE
 		e.preventDefault();
-		if (Line.getLine().getText().toLowerCase()!="> goto github"){
-			addLine();
-		} else {
-			if (confirm("Redirect to GitHub")){
-				window.location.href = "https://github.com/Convobomber34/Editor";
-			} else {
-				Line.getLine().setText("Fine! I won't redirect you, you meanie! >:(=");
-			}
-		}
-		setTimeout(write,10);
+		var txt = Line.getLine().getText();
+		if (txt.indexOf("> ") == 0 & txt.indexOf("~*") != txt.length-2)runCommand(Line.getLine().getText().substr(2));
+		else Line.insertNew();
+
 	} else if (k == 32){
 		e.preventDefault();
-		t.value = "<span class='char' hide=' '>_</span>";
-		setTimeout(write,10);
+		t.value = "<span class='char' whitespace=' '>_</span>";
+	} else if (k == 55 && e.shiftKey){
+		e.preventDefault();
+		t.value = "<span class='char'>&</span>";
 	} else if (k == 188 && e.shiftKey){
 		e.preventDefault();
 		t.value = "<span class='char'><</span>";
-		setTimeout(write,10);
 	} else if (k == 190 && e.shiftKey){
 		e.preventDefault();
 		t.value = "<span class='char'>></span>";
-		setTimeout(write,10);
 	} else if (k == 37 && cursor.x > 0){
 		cursor.add(-1,0);
-		write();
-	} else if (k == 38 && cursor.y > 0){
-		focusLine(cursor.y-1);
+	} else if (k == 38 && cursor.y > 1){
+		e.preventDefault();
+		Line.focusLine(cursor.y-1,true);
+		return;
 	} else if (k == 39 && cursor.x < text.length){
 		cursor.add(1,0);
-		write();
-	} else if (k == 40 && cursor.y < lines.length-1){
-		focusLine(cursor.y+1);
+	} else if (k == 40 && cursor.y < lines.length){
+		e.preventDefault();
+		Line.focusLine(cursor.y+1,true);
+		return;
 	} else if (k == 46){
-		//		removeLine();
-	} else {
-		write();
+		Line.getLine().setText("");
+		return;
 	}
+	write();
+
 	function write(){
 		setTimeout(function(){
 			var value = t.value;
@@ -206,7 +272,6 @@ key = function(e){
 
 				t.value = "";
 			}
-			//			getById("cursor").innerText = cursorPos;
 
 			getById("cursor").style.top = (cursor.y*3)+"px";
 			getById("cursor").style.left = (cursor.x+5)*10+"px";
@@ -215,61 +280,45 @@ key = function(e){
 }
 var _lines = getById("lines");
 _lines.onclick = function(e){
-	line = e.target;
+	clicked = e.target;
 	for (var i=0;i<lines.length;i++){
-		if (line == lines[i]){
-			focusLine(i);
+		if (clicked == lines[i]){
+			Line.focusLine(i+1,false);
+		} else if (clicked.parentNode == lines[i] | clicked.parentNode.parentNode == lines[i]){
+			//		[INSERT CURSOR SUPPORT]
+			Line.focusLine(i+1,false);
 		}
-	}
-}
-
-function focusLine(lineNum,doCatch){
-	lines = getByClass(document,"line");
-	for (var i=0; i<lines.length; i++){
-		lines[i].removeAttribute("focused");
-	}
-	try {
-		lines[lineNum].setAttribute("focused","");
-		cursor.set(cursor.x,lineNum);
-		currentLine = lines[lineNum];
-	} catch (e){
-		focusLine((lineNum<0)?0:lines.length-1);
-		if(doCatch==true)throw Error("Invalid line number");
-	}
-}
-function addLine(){
-	var line = document.createElement("div");
-	line.setAttribute("class","line");
-
-	//		SOON
-	var lineNum = document.createElement("div");
-	lineNum.setAttribute("class","lineNum");
-	lineNum.innerText = lines.length+1;
-	line.appendChild(lineNum);
-
-	var text = document.createElement("span");
-	text.setAttribute("class","text");
-	line.appendChild(text);
-
-	_lines.appendChild(line);
-	focusLine(lines.length-1);
-}
-
-function removeLine(){
-	if (lines.length > 1){
-		_lines.removeChild(lines[cursor.y]);
-		focusLine(cursor.y);
-		drawGutter();
 	}
 }
 
 
 function drawGutter(){
-	//Wait for DOM to be edited
-	setTimeout(function(){
-		var lineNums = getByClass(document,"lineNum");
-		for (var i=0;i<lineNums.length;i++){
-			lineNums[i].innerText = i+1;
+	var lineNums = getByClass(document,"lineNum");
+	for (var i=0;i<lineNums.length;i++){
+		lineNums[i].innerText = i+1;
+	}
+}
+
+
+function runCommand(cmd){
+	var lower = cmd.toLowerCase();
+	if (lower == "goto github"){
+		if (confirm("Redirect to GitHub")){
+			window.open("https://github.com/Convobomber34/Editor");
+		} else {
+			Line.getLine().setText("Fine! I won't redirect you, you meanie! >:(=");
 		}
-	},0);
+	} else if (lower.indexOf("color") == 0){
+		Line.getLine().holder.style.color = cmd.substr(6);
+	} else if (lower.indexOf("run") == 0){
+		if (lower.indexOf("html") == 4 && cursor.y == lines.length){
+			var href="data:text/html, ";
+			for (var i=1;i<lines.length;i++){
+				href += Line.getLine(i).getText()+"\n";
+			}
+			window.open(href);
+		}
+	} else if (lower.indexOf("open") == 0){
+		getById("upload").click();
+	}
 }
