@@ -8,10 +8,11 @@ String.prototype.replaceAll = function(rep,str){
 				if (this.substr(i,rep[rI].length) == rep[rI]){
 					nStr += ((typeof(str)!="object")? str: str[rI]);
 					found = true;
+					i+=rep[rI].length-1;
 					break;
 				}
 			}
-			if (!found)nStr += this.substr(i,1);
+			if (!found) nStr += this.substr(i,1);
 		}
 		return nStr;
 	}
@@ -33,11 +34,45 @@ function getByClass(elem,cName){
 function getById(id){
 	return document.getElementById(id);
 }
-
+function ifValDo(text,values,functions,ifNot){
+	if(values.length!=functions.length)throw new Error("Value and function arrays not equal!");
+	for (var i=0;i<values.length;i++){
+		var V = values[i];
+		if (typeof(V) == "object"){
+			for (var vI=0;vI<V.length;vI++){
+				if (text == V[vI]){
+					functions[i]();
+					return;
+				}
+			}
+		} else {
+			if (text == V){
+				functions[i]();
+				return;
+			}
+		}
+	}
+	if(ifNot)ifNot();
+}
+function formatChars(text,reverse){
+	var normalized = ["\t"," ","&","<",">"],
+		formated = ['<span class="char" whitespace="\t">TTTT</span>','<span class="char" whitespace=" ">_</span>','<span class="char">&</span>','<span class="char"><</span>','<span class="char">></span>'];
+	if (!reverse){
+		return text.replaceAll(normalized,formated);
+	} else {
+		return text.replaceAll(formated,normalized);
+	}
+}
+function objectType(obj){
+	return Object.prototype.toString.call(obj);
+}
 //		Class Objects
 function Cursor(){
 	this.x = 1; this.y = 1;
-	this.holder = getById("cursor");
+
+	this.holder = document.createElement("span");
+	this.holder.setAttribute("class","cursor");
+
 	this.set = function(){
 		var arg1 = arguments[0];
 		if (arg1==null)return;
@@ -60,6 +95,58 @@ function Cursor(){
 	this.get = function(name){
 		return [this.x, this.y];
 	}
+
+	this.getCursor = function(direction){
+		var nodes = this.holder.parentNode.childNodes,
+			cursorPos;
+		for (var i=0;i<nodes.length;i++){
+			var child = nodes[i];
+			if (child==this.holder){
+				cursorPos = i;
+				if(direction == 0) return cursorPos;
+			}
+		}
+		var Nodes = [];
+		if (direction == -1){
+			for (var i=0;i<cursorPos;i++){
+				Nodes[Nodes.length] = nodes[i];
+			}
+		} else if (direction == 1){
+			for (var i=cursorPos+1;i<nodes.length;i++){
+				Nodes[Nodes.length] = nodes[i];
+			}
+		}
+		return Nodes;
+	}
+	this.splitText = function(){
+		var nodes = this.holder.parentNode.childNodes;
+		for (var i=0;i<nodes.length;i++){
+			var child = nodes[i];
+			if (child.nodeName == "#text" && child.nodeValue.length > 1){
+				for (var ch=0;ch<child.nodeValue.length;ch++){
+					var txt = document.createTextNode(child.nodeValue.charAt(ch));
+					child.parentNode.insertBefore(txt,child);
+				}
+				child.parentNode.removeChild(child);
+			}
+		}
+	}
+	this.fixText = function(){
+		var nodes = this.holder.parentNode.childNodes,
+			prevNode = "";
+		for (var i=0;i<nodes.length;i++){
+			var child = nodes[i];
+			if (objectType(child) == "[object Text]"){
+				if (objectType(prevNode) == "[object Text]"){
+					child.nodeValue = prevNode.nodeValue+child.nodeValue;
+					prevNode.parentNode.removeChild(prevNode);
+					i--;
+				}
+				prevNode = child;
+			}
+		}
+	}
+
 	this.toString = function(){
 		return "[object CursorObject]";
 	}
@@ -80,10 +167,8 @@ function Cursor(){
 		}
 		this.setText = function(text){
 			var value = "";
-			text = text.replaceAll(["\t","\n"," ","&","<",">"],["<span class='char' whitespace='\t'>TTTT</span>","","<span class='char' whitespace=' '>_</span>","<span class='char'>&</span>","<span class='char'><</span>","<span class='char'>></span>"]);
-			getByClass(this.holder,"text")[0].innerHTML = text;
+			getByClass(this.holder,"text")[0].innerHTML = formatChars(text);
 		}
-
 		this.focus = function(scroll){
 			lines = getByClass(document,"line");
 			for (var i=0; i<lines.length; i++){
@@ -96,16 +181,16 @@ function Cursor(){
 				}
 			}
 		}
-
-		this.remove = function(){
+		this.remove = function(direction){
 			if (lines.length > 1){
-				_lines.removeChild(this.holder);
-				Line.focusLine(cursor.y-1);
+				Line.Lines.removeChild(this.holder);
+				Line.focusLine(cursor.y+((direction!=null)? direction: 0));
 				drawGutter();
 			}
 		}
 
 	}
+	Line.Lines = getById("lines");
 	Line.getLine = function(lineNum){
 		lineNum = (lineNum!=null)? lineNum: cursor.y;
 		if (lineNum < 1 | lineNum > lines.length) throw new Error("Line number out of range!");
@@ -113,17 +198,26 @@ function Cursor(){
 		line.holder = lines[lineNum-1];
 		return line;
 	}
-	Line.focusLine = function(lineNum,scroll){
+	Line.focusLine = function(lineNum,scroll,x){
 		lineNum = (lineNum > 0)? ((lineNum <= lines.length)? lineNum: lines.length): 1;
 		Line.getLine(lineNum).focus(scroll);
+		var text = getByClass(Line.getLine(lineNum).holder,"text")[0],
+			len = (Line.cursor.holder.parentNode!=text)? text.childNodes.length: text.childNodes.length-1,
+			pos; //= Line.cursor.getCursor();
+		if (x == null || x >= len){
+			text.appendChild(Line.cursor.holder);
+		} else {
+			x = (Line.cursor.holder == text.lastChild)? ((x <= 0)? 0: x): ((x <= 0)? 0: x);
+			text.insertBefore(Line.cursor.holder,text.childNodes[x]);
+		}
 	}
 
 	//	Set the entire document's text
 	Line.setText = function(text){
 		var lines = text.split("\n");
-		_lines.innerHTML = "<div id='cursor'></div>\n<div id='gutter-filler'></div>\n";
+		Line.Lines.innerHTML = "<div id='cursor'></div>\n<div id='gutter-filler'></div>\n";
 		for (var i=0;i<lines.length;i++){
-			Line.insertNew(null,Line.formatChars(lines[i])+"</span></div>\n");
+			Line.insertNew(null,formatChars(lines[i])+"</span></div>\n");
 		}
 		Line.focusLine(1);
 	}
@@ -145,19 +239,178 @@ function Cursor(){
 		text.innerHTML = content;
 		line.appendChild(text);
 
-		if (before)_lines.insertBefore(line,before)
-		else _lines.appendChild(line);
+		if (before)Line.Lines.insertBefore(line,before)
+		else Line.Lines.appendChild(line);
 		Line.focusLine(index+1);
 		drawGutter();
+		return line;
 	}
-	Line.removeLine = function(lineNum){
-		Line.getLine(lineNum).remove();
+	Line.removeLine = function(lineNum,direction){
+		Line.getLine(lineNum).remove(direction);
 	}
 
-	Line.formatChars = function(text,reverse){
-		var normalized = ["\t"," ","&","<",">"],
-			formated = ["<span class='char' whitespace='\t'>TTTT</span>","<span class='char' whitespace=' '>_</span>","<span class='char'>&</span>","<span class='char'><</span>","<span class='char'>></span>"];
-		return (!reverse)? text.replaceAll(normalized,formated): text.replaceAll(formated,normalized);
+	Line.handleInput = function(key,value){
+		Line.cursor.splitText();
+		var text = getByClass(Line.getLine().holder,"text")[0];
+		Line.cursor.holder = getByClass(Line.getLine().holder,"cursor")[0];
+		ifValDo(key,
+		//backspace, enter, left,up,right,down, del
+
+		[8,13,37,38,39,40,46],
+		[
+			function(){
+				var before = Line.cursor.getCursor(-1);
+				if (before.length == 0){
+					if (lines.length > 1){
+						Line.cursor.splitText();
+						var after = Line.cursor.getCursor(1);
+						var text = getByClass(Line.getLine(cursor.y-1).holder,"text")[0];
+						text.appendChild(Line.cursor.holder);
+						for (var i=0;i<after.length;i++){
+							text.appendChild(after[i]);
+						}
+						setTimeout(function(){
+							Line.removeLine(null,-1);
+						},5);
+					}
+				} else {
+					var text = getByClass(Line.getLine().holder,"text")[0];
+					var before = Line.cursor.getCursor(-1);
+					text.removeChild(before[before.length-1]);
+				}
+			},
+			function(){Line.insertNew();},
+			function(){
+				setTimeout(function(){
+					var before = Line.cursor.getBefore();
+					if (before!=null){
+						before.parentNode.insertBefore(Line.cursor.holder,before);
+					}
+				},20);
+			},
+			function(){if(cursor.y>1)Line.focusLine(cursor.y-1,true)},
+			function(){
+				var after = Line.cursor.getAfter();
+				if (after!=null){
+					after.parentNode.insertBefore(after,Line.cursor.holder);
+				}
+			},
+			function(){if(cursor.y<lines.length)Line.focusLine(cursor.y+1,true)},
+			function(){
+				if(Line.cursor.getAfter()==null){
+					if (lines.length > 1){
+						Line.removeLine(null,1);
+						Line.getLine().holder.appendChild(Line.cursor.holder);
+					}
+				} else {
+					if (text.childNodes.length > 1){
+						text.removeChild(Line.cursor.getAfter());
+					}
+				}}
+		],
+		//Write
+		function(){
+			if (value != ""){
+				if (value.indexOf("<span ") == 0){
+					var D = document.createElement("div");
+					D.innerHTML = value;
+					setTimeout(function(){
+						text.insertBefore(D.children[0],Line.cursor.holder);
+					},10);
+				} else {
+					text.insertBefore(document.createTextNode(value),Line.cursor.holder);
+				}
+			}
+		});
+	}
+	Line.cursor = new Cursor();
+}
+/*Console*/{
+	function Console(){
+
+	}
+	Console.holder = getById("console");
+	Console.lines = getById("console-text");
+	Console.input = getById("console-input");
+	Console.history = {commands: [], currentText: "", historyPos: 0};
+
+	Console.move = function(e){
+		Console.holder.style.left = (((document.all)? e.clientX: e.pageX)-Console.x)+"px";
+		Console.holder.style.top = (((document.all)? e.clientY: e.pageY)-Console.y)+"px";
+	}
+
+	getById("console-handle").onmousedown = function(e){
+		Console.x = e.clientX-(Console.holder.offsetLeft);
+		Console.y = e.clientY-(Console.holder.offsetTop);
+		document.onmousemove = Console.move;
+		Console.holder.onmouseup = function(){
+			document.onmouseup = null;
+			document.onmousemove = null;
+			Console.x = null, Console.y = null;
+		}
+	}
+
+	Console.holder.onclick = function(e){
+		t.focus();
+		textTarget = Console;
+	};
+	Console.handleInput = function(key,value){
+		var _text = Console.input,
+			text = formatChars(_text.innerHTML,true);
+		ifValDo(key,
+		[8,13,38,40],
+		[
+			function(){
+				if (text!=""){
+					var child = _text.childNodes[_text.childNodes.length-1];
+					if (child.toString() == "[object Text]"){
+						_text.innerHTML = _text.innerHTML.substr(0,_text.innerHTML.length-1);
+						cursor.add(-1,0);
+					} else {
+						_text.removeChild(child);
+						cursor.add(Number(child.getAttribute("len")),0);
+					}
+				}
+			},
+			function(){
+				if (Console.history.commands.length > 20) Console.history.commands.splice(0,1);
+				Console.history.commands.splice(Console.history.commands.length,0,_text.innerHTML);
+				var args = text.split(" ").splice(0,1);
+				Console.write(Console.input.innerHTML);
+				runCommand(text,args);
+				Console.input.innerHTML = "";
+				Console.history.historyPos = Console.history.commands.length;
+			},
+			function(){
+				if (Console.history.historyPos > 0)Console.history.historyPos--;
+				_text.innerHTML = Console.history.commands[Console.history.historyPos];
+			},
+			function(){
+				if (Console.history.historyPos < Console.history.commands.length)Console.history.historyPos++;
+				_text.innerHTML = ((Console.history.historyPos < Console.history.commands.length)? Console.history.commands[Console.history.historyPos]: "");
+			}
+		],
+		function(){
+			if (value != ""){
+				if (value.indexOf("<span ") == 0){
+					cursor.add(Number(value.substr(value.indexOf("len='")+5,1)),0);
+				} else {
+					cursor.add(value.length,0);
+				}
+				_text.innerHTML += value;
+			}
+		});
+	}
+
+	Console.write = function(text){
+		var line = document.createElement("div");
+		line.setAttribute("class","line");
+		line.innerHTML = formatChars(text);
+		Console.lines.insertBefore(line,Console.input);
+	}
+	Console.clear = function(){
+		Console.lines.innerHTML = "";
+		Console.lines.appendChild(Console.input);
 	}
 
 }
@@ -167,56 +420,35 @@ function Cursor(){
 
 var t=getById("t"),
 	lines=getByClass(document,"line"),
-	cursor;
+	cursor,
+	textTarget = null;
 
+
+//		EVENT LISTENERS
+
+window.onload = function(){
+	cursor = new Cursor();
+	var line = Line.insertNew();
+	getByClass(line,"text")[0].appendChild(Line.cursor.holder);
+};
+document.onselectstart = function(e){e.preventDefault(); return false};
 getById("upload").onchange = function(e){
 	var r = new FileReader();
 	r.readAsText(e.target.files[0]);
 	r.onload = function(){
 		Line.setText(r.result);
+		textTarget = Line;
 	}
 	e.target.value = "";
-}
-
-//		EVENT LISTENERS
-
-window.onload = function(){
-	t.focus();
-	cursor = new Cursor();
-	Line.insertNew();
 };
-document.body.onclick = function(){
-	t.focus();
-}
-t.onfocus = function(){
-	t.onkeydown = key;
-}
-document.onblur = function(){
-	t.onkeydown = null;
-}
 
-key = function(e){
-	var k = e.keyCode,
-		text = getByClass(currentLine,"text")[0];
+t.onkeydown = function(e){
+	var k = e.keyCode;
 	if (k == 8){
 		e.preventDefault();
-		if (Line.getLine().getText()!=""){
-			t.value = "\b";
-			write();
-		} else {
-			Line.removeLine();
-		}
 	} else if (k == 9){
-		//		TAB
 		e.preventDefault();
 		t.value = "<span class='char' whitespace='\t'>TTTT</span>";
-	} else if (k == 13){
-		//		ADD NEW LINE
-		e.preventDefault();
-		var txt = Line.getLine().getText();
-		if (txt.indexOf("> ") == 0 & txt.indexOf("~*") != txt.length-2)runCommand(Line.getLine().getText().substr(2));
-		else Line.insertNew();
-
 	} else if (k == 32){
 		e.preventDefault();
 		t.value = "<span class='char' whitespace=' '>_</span>";
@@ -229,57 +461,23 @@ key = function(e){
 	} else if (k == 190 && e.shiftKey){
 		e.preventDefault();
 		t.value = "<span class='char'>></span>";
-	} else if (k == 37 && cursor.x > 0){
-		cursor.add(-1,0);
-	} else if (k == 38 && cursor.y > 1){
+	} else if (k == 37){
+//		cursor.add(-1,0);
+	} else if (k == 38){
 		e.preventDefault();
-		Line.focusLine(cursor.y-1,true);
-		return;
-	} else if (k == 39 && cursor.x < text.length){
-		cursor.add(1,0);
+	} else if (k == 39){
+//		cursor.add(1,0);
 	} else if (k == 40 && cursor.y < lines.length){
 		e.preventDefault();
-		Line.focusLine(cursor.y+1,true);
-		return;
 	} else if (k == 46){
-		Line.getLine().setText("");
-		return;
 	}
-	write();
-
-	function write(){
-		setTimeout(function(){
-			var value = t.value;
-			if (value != ""){
-				if (value == "\b"){
-					if (text.childNodes.length > 0){
-						var child = text.childNodes[text.childNodes.length-1];
-						if (child.toString() == "[object Text]"){
-							text.innerHTML = text.innerHTML.substr(0,text.innerHTML.length-1);
-							cursor.add(-1,0);
-						} else {
-							text.removeChild(child);
-							cursor.add(Number(child.getAttribute("len")),0);
-						}
-					}
-					value = "";
-				} else if (value.indexOf("<span ") == 0){
-					cursor.add(Number(value.substr(value.indexOf("len='")+5,1)),0);
-				} else {
-					cursor.add(value.length,0);
-				}
-				text.innerHTML += value;
-
-				t.value = "";
-			}
-
-			getById("cursor").style.top = (cursor.y*3)+"px";
-			getById("cursor").style.left = (cursor.x+5)*10+"px";
-		},10);
-	}
+	setTimeout(function(){textTarget.handleInput(k,t.value)},0);
+	setTimeout(function(){t.value=""},10);
 }
-var _lines = getById("lines");
-_lines.onclick = function(e){
+
+Line.Lines.onclick = function(e){
+	t.focus();
+	textTarget = Line;
 	clicked = e.target;
 	for (var i=0;i<lines.length;i++){
 		if (clicked == lines[i]){
@@ -291,7 +489,6 @@ _lines.onclick = function(e){
 	}
 }
 
-
 function drawGutter(){
 	var lineNums = getByClass(document,"lineNum");
 	for (var i=0;i<lineNums.length;i++){
@@ -300,25 +497,57 @@ function drawGutter(){
 }
 
 
-function runCommand(cmd){
+function runCommand(cmd,args){
 	var lower = cmd.toLowerCase();
-	if (lower == "goto github"){
-		if (confirm("Redirect to GitHub")){
-			window.open("https://github.com/Convobomber34/Editor");
-		} else {
-			Line.getLine().setText("Fine! I won't redirect you, you meanie! >:(=");
-		}
-	} else if (lower.indexOf("color") == 0){
-		Line.getLine().holder.style.color = cmd.substr(6);
-	} else if (lower.indexOf("run") == 0){
-		if (lower.indexOf("html") == 4 && cursor.y == lines.length){
-			var href="data:text/html, ";
-			for (var i=1;i<lines.length;i++){
-				href += Line.getLine(i).getText()+"\n";
-			}
-			window.open(href);
-		}
-	} else if (lower.indexOf("open") == 0){
-		getById("upload").click();
-	}
+
+	var commands = [
+		"help",["clear","cls"],"goto","run","open"
+	],
+		actions = [
+			function(){
+				Console.write("Help:");
+				var message = "";
+				commands.sort();
+				for (var i=0;i<commands.length-1;i++){
+					var cmd = commands[i];
+					if (typeof(cmd) == "object"){
+						message += "["
+						for (var cI=0;cI<cmd.length-1;cI++){
+							message += cmd[cI]+",";
+						}
+						message += cmd[cI]+"], ";
+					} else {
+						message += commands[i]+", ";
+					}
+				}
+				message += commands[i]+".";
+				Console.write(message);
+			},
+			function(){
+				Console.clear();
+				Console.history = {commands: [cmd], currentText: "", historyPos: 0};
+			},
+			function(){
+				if (args[0]=="github"){
+					if (confirm("Redirect to GitHub")){
+						window.open("https://github.com/Convobomber34/Editor");
+					} else {
+						Console.write("Fine! I won't redirect you, you meanie! >:(=");
+					}
+				}
+			},
+			function(){
+				if (args[0] == "html"){
+					var href="data:text/html, ";
+					for (var i=1;i<lines.length;i++){
+						href += Line.getLine(i).getText()+"\n";
+					}
+					href += Line.getLine(i).getText()+"\n";
+					window.open(href);
+				}
+			},
+			function(){getById("upload").click()}
+		];
+	alert
+	ifValDo(lower,commands,actions,function(){Console.write("Unknow command. Try help")});
 }
